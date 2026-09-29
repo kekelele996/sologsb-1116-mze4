@@ -23,6 +23,8 @@ import { recordStore } from '@/stores/recordStore'
 import { sporeStore } from '@/stores/sporeStore'
 import { pointStore } from '@/stores/pointStore'
 import { identifyStore } from '@/stores/identifyStore'
+import { curationStore } from '@/stores/curationStore'
+import { removalBlocked } from '@/utils/guards'
 import { uid } from '@/utils/id'
 
 const router = useRouter()
@@ -30,27 +32,32 @@ const recordState = useStore(recordStore)
 const sporeState = useStore(sporeStore)
 const pointState = useStore(pointStore)
 const identifyState = useStore(identifyStore)
+const curationState = useStore(curationStore)
 
 const filterAttachment = ref<GillAttachment | ''>('')
 const filterColor = ref<SporeColor | ''>('')
 const keyword = ref('')
 const compareIds = ref<string[]>([])
+/** 图谱默认只展示正常条目；归档快照（合并/拆分来源）需手动勾选查看 */
+const showArchived = ref(false)
+
+/** 参与候选排序、筛选与卡片展示的条目：归档快照不参与整理后的图谱统计 */
+const activeRecords = computed(() => recordState.records.filter((record) => record.status === 'active'))
 
 const criteria = computed<MatchCriteria>(() => ({
   ...EMPTY_CRITERIA,
   attachment: filterAttachment.value,
   sporeColor: filterColor.value
 }))
-const { candidates } = useCandidateMatch(
-  computed(() => recordState.records),
-  computed(() => sporeState.spores),
-  criteria
-)
+const { candidates } = useCandidateMatch(activeRecords, computed(() => sporeState.spores), criteria)
 
-/** 图谱筛选：印色 + 着生方式 + 关键字（未设条件时按编号排序） */
+/** 图谱筛选：印色 + 着生方式 + 关键字（未设条件时按编号排序）；归档快照始终列在末尾 */
 const visible = computed(() => {
+  const rows = showArchived.value
+    ? recordState.records
+    : recordState.records.filter((record) => record.status === 'active')
   if (!filterAttachment.value && !filterColor.value && !keyword.value.trim()) {
-    return recordState.records.map((record) => ({
+    return rows.map((record) => ({
       record,
       spore: sporeState.spores.find((item) => item.recordId === record.id) ?? null,
       percent: 0,
@@ -60,6 +67,7 @@ const visible = computed(() => {
   const text = keyword.value.trim().toLowerCase()
   return candidates.value
     .filter((item) => {
+      if (!rows.some((record) => record.id === item.record.id)) return false
       if (filterAttachment.value && item.record.attachment !== filterAttachment.value) return false
       if (filterColor.value && item.spore?.color !== filterColor.value) return false
       if (text) {
@@ -72,6 +80,8 @@ const visible = computed(() => {
     })
     .map((item) => ({ record: item.record, spore: item.spore, percent: item.percent, matched: item.matched }))
 })
+
+const archivedCount = computed(() => recordState.records.filter((record) => record.status !== 'active').length)
 
 function pointName(pointId: string): string {
   return pointState.points.find((point) => point.id === pointId)?.name ?? '未关联采集点'
@@ -134,7 +144,7 @@ watch(
 )
 
 function openCreate(): void {
-  form.code = `REC-${String(recordState.records.length + 1).padStart(3, '0')}`
+  form.code = `REC-${String(activeRecords.value.length + 1).padStart(3, '0')}`
   form.tempName = ''
   form.note = ''
   dialogVisible.value = true
@@ -149,7 +159,7 @@ async function submit(): Promise<void> {
     ElMessage.warning('请选择采集点')
     return
   }
-  if (recordState.records.some((item) => item.code === form.code.trim())) {
+  if (activeRecords.value.some((item) => item.code === form.code.trim())) {
     ElMessage.warning(`采集编号「${form.code}」已存在，请换一个`)
     return
   }
@@ -175,7 +185,8 @@ async function submit(): Promise<void> {
     hostTree: form.hostTree.trim(),
     collectDate: form.collectDate,
     collector: form.collector.trim(),
-    note: form.note.trim()
+    note: form.note.trim(),
+    status: 'active'
   }
   await recordStore.getState().save(record)
   dialogVisible.value = false
@@ -183,6 +194,18 @@ async function submit(): Promise<void> {
 }
 
 async function removeRecord(record: FungusRecord): Promise<void> {
+  // 整理链路上的条目（归档快照 / 合并主条目 / 拆分产物）受关联保护，不能删除
+  const blocked = removalBlocked(record, {
+    records: recordState.records,
+    spores: sporeState.spores,
+    identifies: identifyState.logs,
+    points: pointState.points,
+    events: curationState.events
+  })
+  if (blocked) {
+    ElMessage.error(blocked)
+    return
+  }
   await ElMessageBox.confirm(`确认删除条目「${record.code}」？其孢子印与鉴定留痕一并清理`, '删除确认', {
     type: 'warning'
   })
@@ -207,6 +230,9 @@ async function removeRecord(record: FungusRecord): Promise<void> {
         <el-button v-if="compareIds.length > 0" type="primary" plain @click="goCompare">
           对比已选 {{ compareIds.length }} 条
         </el-button>
+        <el-button type="warning" plain @click="router.push('/curation')">
+          <el-icon><Connection /></el-icon>记录整理
+        </el-button>
         <el-button type="primary" @click="openCreate">
           <el-icon><Plus /></el-icon>新建条目
         </el-button>
@@ -221,7 +247,10 @@ async function removeRecord(record: FungusRecord): Promise<void> {
         <el-option v-for="item in GILL_ATTACHMENTS" :key="item" :label="item" :value="item" />
       </el-select>
       <el-input v-model="keyword" placeholder="编号 / 暂定名 / 树种 / 采集人" clearable style="width: 260px" />
-      <el-tag type="info" effect="plain">命中 {{ visible.length }} / {{ recordState.records.length }} 条</el-tag>
+      <el-checkbox v-model="showArchived">显示归档快照（{{ archivedCount }}）</el-checkbox>
+      <el-tag type="info" effect="plain">
+        {{ showArchived ? `展示 ${visible.length} / ${recordState.records.length} 条（含归档）` : `命中 ${visible.length} / ${activeRecords.length} 条` }}
+      </el-tag>
       <el-button
         v-if="filterColor || filterAttachment || keyword"
         @click="(() => { filterColor = ''; filterAttachment = ''; keyword = '' })()"
@@ -231,10 +260,20 @@ async function removeRecord(record: FungusRecord): Promise<void> {
     </div>
 
     <div class="card-grid">
-      <el-card v-for="item in visible" :key="item.record.id" shadow="hover" class="atlas-card">
+      <el-card
+        v-for="item in visible"
+        :key="item.record.id"
+        shadow="hover"
+        class="atlas-card"
+        :class="{ archived: item.record.status !== 'active' }"
+      >
         <div class="card-top">
           <div>
-            <div class="rec-name">{{ item.record.tempName || '未命名条目' }}</div>
+            <div class="rec-name">
+              {{ item.record.tempName || '未命名条目' }}
+              <el-tag v-if="item.record.status === 'merged'" size="small" type="warning" effect="dark">已合并·快照</el-tag>
+              <el-tag v-else-if="item.record.status === 'split'" size="small" type="warning" effect="dark">已拆分·来源</el-tag>
+            </div>
             <div class="mono muted">{{ item.record.code }} · {{ pointName(item.record.pointId) }}</div>
           </div>
           <div class="tags">
@@ -264,15 +303,29 @@ async function removeRecord(record: FungusRecord): Promise<void> {
           <el-tag v-if="item.percent > 0" size="small" effect="plain">匹配度 {{ item.percent }}%</el-tag>
         </div>
         <div class="card-actions">
-          <el-button size="small" @click="router.push(`/atlas/${item.record.id}`)">详情</el-button>
-          <el-button
-            size="small"
-            :type="compareIds.includes(item.record.id) ? 'primary' : 'default'"
-            @click="toggleCompare(item.record.id)"
-          >
-            {{ compareIds.includes(item.record.id) ? '已加入对比' : '加入对比' }}
+          <el-button size="small" @click="router.push(`/atlas/${item.record.id}`)">
+            {{ item.record.status === 'active' ? '详情' : '查看快照' }}
           </el-button>
-          <el-button size="small" type="danger" plain @click="removeRecord(item.record)">删除</el-button>
+          <template v-if="item.record.status === 'active'">
+            <el-button
+              size="small"
+              :type="compareIds.includes(item.record.id) ? 'primary' : 'default'"
+              @click="toggleCompare(item.record.id)"
+            >
+              {{ compareIds.includes(item.record.id) ? '已加入对比' : '加入对比' }}
+            </el-button>
+            <el-button size="small" type="warning" plain @click="router.push('/curation')">整理</el-button>
+            <el-button size="small" type="danger" plain @click="removeRecord(item.record)">删除</el-button>
+          </template>
+          <el-button
+            v-else-if="item.record.status === 'merged' && item.record.mergedIntoId"
+            size="small"
+            type="primary"
+            plain
+            @click="router.push(`/atlas/${item.record.mergedIntoId}`)"
+          >
+            前往主条目
+          </el-button>
         </div>
       </el-card>
       <el-empty v-if="visible.length === 0" description="没有命中的条目，调整筛选条件或新建条目" />
@@ -431,6 +484,11 @@ async function removeRecord(record: FungusRecord): Promise<void> {
 }
 .atlas-card {
   border-radius: 12px;
+}
+.atlas-card.archived {
+  background: #faf7f1;
+  border-style: dashed;
+  opacity: 0.92;
 }
 .card-top {
   display: flex;

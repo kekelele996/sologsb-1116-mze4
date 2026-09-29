@@ -30,6 +30,10 @@ export type RingType = (typeof RING_TYPES)[number]
 export const VOLVA_TYPES = ['无菌托', '杯状菌托', '鳞片状菌托', '苞状菌托'] as const
 export type VolvaType = (typeof VOLVA_TYPES)[number]
 
+/** 条目整理状态：active 正常条目；merged 合并后归档；split 拆分后归档（原条留作来源快照） */
+export const RECORD_STATUS = ['active', 'merged', 'split'] as const
+export type RecordStatus = (typeof RECORD_STATUS)[number]
+
 /** FungusRecord 菌物条目 */
 export interface FungusRecord {
   id: string
@@ -66,4 +70,10 @@ export interface FungusRecord {
   collector: string
   /** 备注（不可作为食用依据） */
   note: string
+  /** 整理状态（v3 起；历史数据迁移时补 active） */
+  status: RecordStatus
+  /** merged：合并到的主条目 id；split 源条目自身留空，拆分产物用 splitFromId 指向来源 */
+  mergedIntoId?: string
+  /** 拆分产物指向其来源条目的 id */
+  splitFromId?: string
 }

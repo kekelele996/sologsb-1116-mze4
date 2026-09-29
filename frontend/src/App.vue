@@ -4,36 +4,38 @@ import { useRoute } from 'vue-router'
 import { useStore } from '@/hooks/usePersistentStore'
 import { recordStore } from '@/stores/recordStore'
 import { sporeStore } from '@/stores/sporeStore'
-import { pointStore } from '@/stores/pointStore'
 import { identifyStore } from '@/stores/identifyStore'
+import { curationStore } from '@/stores/curationStore'
 
 const route = useRoute()
 const recordState = useStore(recordStore)
 const sporeState = useStore(sporeStore)
-const pointState = useStore(pointStore)
 const identifyState = useStore(identifyStore)
+const curationState = useStore(curationStore)
 
 const menus = [
   { path: '/atlas', label: '图谱总览', icon: 'Grid' },
   { path: '/points', label: '采集点管理', icon: 'Location' },
   { path: '/identify', label: '鉴定工作页', icon: 'Search' },
+  { path: '/curation', label: '记录整理', icon: 'Connection' },
   { path: '/compare', label: '条目对比', icon: 'Files' }
 ]
 
 const activeMenu = computed(() => menus.find((item) => route.path.startsWith(item.path))?.path ?? '/atlas')
 
 const stats = computed(() => [
-  { label: '条目', value: recordState.records.length },
+  { label: '条目', value: recordState.records.filter((record) => record.status === 'active').length },
+  { label: '归档快照', value: recordState.records.filter((record) => record.status !== 'active').length },
   { label: '孢子印', value: sporeState.spores.length },
-  { label: '采集点', value: pointState.points.length },
-  { label: '鉴定留痕', value: identifyState.logs.length }
+  { label: '鉴定留痕', value: identifyState.logs.length },
+  { label: '整理事件', value: curationState.events.length }
 ])
 
 onMounted(async () => {
   await recordStore.getState().hydrate()
   await sporeStore.getState().hydrate()
-  await pointStore.getState().hydrate()
   await identifyStore.getState().hydrate()
+  await curationStore.getState().hydrate()
 })
 </script>
 

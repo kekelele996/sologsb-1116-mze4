@@ -83,7 +83,13 @@ async function submit(): Promise<void> {
 }
 
 function recordsOf(pointId: string): number {
-  return recordState.records.filter((record) => record.pointId === pointId).length
+  // 图谱口径只数正常条目；归档快照在删除校验中另计
+  return recordState.records.filter((record) => record.pointId === pointId && record.status === 'active').length
+}
+
+/** 该采集点下的归档快照数（整理来源仍引用采集点，采集点删除会造成关联缺失） */
+function archivedOf(pointId: string): number {
+  return recordState.records.filter((record) => record.pointId === pointId && record.status !== 'active').length
 }
 
 /** 主要基物：该采集点下条目最常见的基物（采集点自身基物优先） */
@@ -95,8 +101,11 @@ function mainSubstrate(point: CollectPoint): string {
 
 async function remove(point: CollectPoint): Promise<void> {
   const count = recordsOf(point.id)
-  if (count > 0) {
-    ElMessage.error(`「${point.name}」下仍有 ${count} 条菌物条目，请先清理条目`)
+  const archived = archivedOf(point.id)
+  if (count > 0 || archived > 0) {
+    ElMessage.error(
+      `「${point.name}」下仍有 ${count} 条正常条目${archived ? `、${archived} 条归档快照` : ''}，请先清理条目`
+    )
     return
   }
   await ElMessageBox.confirm(`确认删除采集点「${point.name}」？`, '删除确认', { type: 'warning' })
@@ -135,7 +144,9 @@ async function remove(point: CollectPoint): Promise<void> {
               {{ point.longitude.toFixed(4) }}, {{ point.latitude.toFixed(4) }} · {{ point.altitude }} m
             </div>
           </div>
-          <el-tag effect="plain" size="small">条目 {{ recordsOf(point.id) }}</el-tag>
+          <el-tag effect="plain" size="small">
+            条目 {{ recordsOf(point.id) }}<template v-if="archivedOf(point.id)"> · 快照 {{ archivedOf(point.id) }}</template>
+          </el-tag>
         </div>
         <el-descriptions :column="1" size="small" border class="desc">
           <el-descriptions-item label="植被类型">{{ point.vegetation }}</el-descriptions-item>

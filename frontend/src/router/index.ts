@@ -27,6 +27,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '鉴定工作页' }
   },
   {
+    path: '/curation',
+    name: 'curation',
+    component: () => import('@/pages/CurationPage.vue'),
+    meta: { title: '记录整理' }
+  },
+  {
     path: '/compare',
     name: 'compare',
     component: () => import('@/pages/ComparePage.vue'),

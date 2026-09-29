@@ -22,14 +22,21 @@ const identifyState = useStore(identifyStore)
 const selectedIds = ref<string[]>([])
 const keyword = ref('')
 
+/** 对比仅针对正常条目；整理后归档的来源不参与对比 */
+const activeRecords = computed(() => recordState.records.filter((record) => record.status === 'active'))
+
 watch(
   () => [route.query.ids, recordState.records.length] as const,
   () => {
     const raw = typeof route.query.ids === 'string' ? route.query.ids : ''
     if (raw) {
-      selectedIds.value = raw.split(',').filter(Boolean).slice(0, 3)
-    } else if (selectedIds.value.length === 0 && recordState.records.length >= 2) {
-      selectedIds.value = recordState.records.slice(0, 2).map((item) => item.id)
+      selectedIds.value = raw
+        .split(',')
+        .filter(Boolean)
+        .filter((id) => activeRecords.value.some((record) => record.id === id))
+        .slice(0, 3)
+    } else if (selectedIds.value.length === 0 && activeRecords.value.length >= 2) {
+      selectedIds.value = activeRecords.value.slice(0, 2).map((item) => item.id)
     }
   },
   { immediate: true }
@@ -37,8 +44,8 @@ watch(
 
 const candidatesList = computed(() => {
   const text = keyword.value.trim().toLowerCase()
-  if (!text) return recordState.records
-  return recordState.records.filter((item) =>
+  if (!text) return activeRecords.value
+  return activeRecords.value.filter((item) =>
     [item.code, item.tempName, item.hostTree].join(' ').toLowerCase().includes(text)
   )
 })

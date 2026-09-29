@@ -1,22 +1,23 @@
 import { onUnmounted, reactive } from 'vue'
 import type { StoreApi } from 'zustand/vanilla'
 import Dexie, { type Table } from 'dexie'
-import type { CollectPoint, FungusRecord, IdentifyLog, SporePrint } from '@/types'
+import type { CollectPoint, CurationEvent, FungusRecord, IdentifyLog, SporePrint } from '@/types'
 
 /** IndexedDB 数据结构版本号 */
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 export interface MetaRow {
   key: string
   value: number
 }
 
-/** Dexie 封装：条目 / 孢子印 / 采集点 / 鉴定结论 四张表 + 元数据表 */
+/** Dexie 封装：条目 / 孢子印 / 采集点 / 鉴定结论 / 整理事件 五张表 + 元数据表 */
 class FungiGuideDb extends Dexie {
   records!: Table<FungusRecord, string>
   spores!: Table<SporePrint, string>
   points!: Table<CollectPoint, string>
   identifies!: Table<IdentifyLog, string>
+  curations!: Table<CurationEvent, string>
   meta!: Table<MetaRow, string>
 
   constructor() {
@@ -29,7 +30,7 @@ class FungiGuideDb extends Dexie {
       meta: 'key'
     })
     // v2：新增「菌肉变色反应」字段，迁移时为历史条目补齐默认值（不变色）
-    this.version(SCHEMA_VERSION)
+    this.version(2)
       .stores({
         records: 'id, code, pointId, attachment, capShape',
         spores: 'id, recordId, color, observeDate',
@@ -47,6 +48,26 @@ class FungiGuideDb extends Dexie {
             }
           })
       })
+    // v3：记录整理（合并 / 拆分）。归档状态与来源指针随条目持久化，整理事件独立成表
+    this.version(SCHEMA_VERSION)
+      .stores({
+        records: 'id, code, pointId, attachment, capShape, status, mergedIntoId, splitFromId',
+        spores: 'id, recordId, color, observeDate',
+        points: 'id, name, substrate, vegetation',
+        identifies: 'id, recordId, conclusion, date',
+        curations: 'id, kind, date',
+        meta: 'key'
+      })
+      .upgrade(async (tx) => {
+        await tx
+          .table<FungusRecord, string>('records')
+          .toCollection()
+          .modify((record) => {
+            if (!record.status) {
+              record.status = 'active'
+            }
+          })
+      })
   }
 }
 
@@ -60,6 +81,14 @@ export async function stampDbVersion(): Promise<void> {
 /** 读取整表 */
 export async function syncAll<T extends object>(table: Table<T, string>): Promise<T[]> {
   return table.toArray()
+}
+
+/**
+ * 跨表事务：记录整理要求「校验不过则原记录、孢子印、鉴定留痕一律不改」，
+ * 合并 / 拆分的全部写入必须落在同一个可回滚事务里。
+ */
+export async function curationTransaction(task: () => Promise<void>): Promise<void> {
+  await db.transaction('rw', db.records, db.spores, db.identifies, db.curations, task)
 }
 
 /** 写入一条记录 */
@@ -139,7 +168,8 @@ export async function seedDemoData(): Promise<void> {
       hostTree: '辽东栎',
       collectDate: today,
       collector: '沈禾',
-      note: '菌管层易剥离，仅作形态记录'
+      note: '菌管层易剥离，仅作形态记录',
+      status: 'active'
     },
     {
       id: 'rec_002',
@@ -163,7 +193,8 @@ export async function seedDemoData(): Promise<void> {
       hostTree: '油松',
       collectDate: today,
       collector: '沈禾',
-      note: '菌褶边缘略带紫晕'
+      note: '菌褶边缘略带紫晕',
+      status: 'active'
     },
     {
       id: 'rec_003',
@@ -187,7 +218,8 @@ export async function seedDemoData(): Promise<void> {
       hostTree: '麻栎',
       collectDate: today,
       collector: '祁野',
-      note: '生于倒木侧面，质地木栓化'
+      note: '生于倒木侧面，质地木栓化',
+      status: 'active'
     }
   ])
 

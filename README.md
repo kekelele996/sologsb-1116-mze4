@@ -36,8 +36,7 @@ FRONTEND_PORT=21816
 | 状态管理 | Zustand（`zustand/vanilla` createStore + Vue 响应式桥接） |
 | 路由 | Vue Router 4（History 模式，nginx `try_files` 回落） |
 | 构建 | Vite 6 |
-| 本地存储 | IndexedDB（Dexie 封装，含 `schemaVersion` 与升级迁移） |
-| 部署 | 多阶段 Dockerfile：`node:20-alpine` 构建 → `nginx:alpine` 托管 |
+| 本地存储 | IndexedDB（Dexie 封装，含 `schemaVersion` 与升级迁移） || 部署 | 多阶段 Dockerfile：`node:20-alpine` 构建 → `nginx:alpine` 托管 |
 
 ## 三、本地开发
 
@@ -59,27 +58,39 @@ sologsb-1116/
 │   ├── nginx.conf              # try_files 前端路由回落 + gzip
 │   ├── public/favicon.svg
 │   └── src/
-│       ├── types/              # record.ts / spore.ts / point.ts / identify.ts / index.ts
-│       ├── stores/             # recordStore / sporeStore / pointStore / identifyStore（Zustand）
-│       ├── components/common/  # SporePrintSwatch / TraitsSummary / GillAttachmentTag / GeoPointForm
+│       ├── types/              # record.ts / spore.ts / point.ts / identify.ts / curation.ts / index.ts
+│       ├── stores/             # recordStore / sporeStore / pointStore / identifyStore / curationStore（Zustand）
+│       ├── components/common/  # SporePrintSwatch / TraitsSummary / GillAttachmentTag / GeoPointForm / CurationTrace / AttachmentAssignTable / RecordDraftForm
+│       ├── components/curation/ # MergePanel / SplitPanel（整理向导）
 │       ├── hooks/              # usePersistentStore / useCandidateMatch
-│       ├── pages/              # AtlasPage / RecordDetailPage / PointsPage / IdentifyPage / ComparePage
+│       ├── pages/              # AtlasPage / RecordDetailPage / PointsPage / IdentifyPage / ComparePage / CurationPage
 │       ├── router/index.ts
-│       └── utils/              # spore.ts / export.ts / id.ts
+│       └── utils/              # spore.ts / export.ts / id.ts / curation.ts / guards.ts（整理安全校验）
+│   └── scripts/test-guards.mjs # 整理安全校验独立测试：node scripts/test-guards.mjs
 ```
 
 ## 五、数据模型与存储
 
 | 模型 | 说明 | Dexie 表 |
 | --- | --- | --- |
-| FungusRecord 菌物条目 | 采集编号、暂定名、菌盖（直径/形状/边缘/质地）、菌肉厚度与变色反应、着生方式、菌褶密度、菌柄、菌环菌托、气味、关联树种 | `records` |
+| FungusRecord 菌物条目 | 采集编号、暂定名、菌盖（直径/形状/边缘/质地）、菌肉厚度与变色反应、着生方式、菌褶密度、菌柄、菌环菌托、气味、关联树种；含整理状态 `status`（active/merged/split）、`mergedIntoId`、`splitFromId` | `records` |
 | SporePrint 孢子印 | 印色、印形、获取时长、观察日期、样本干湿度 | `spores` |
 | CollectPoint 采集点 | 地点名、经纬度、海拔、植被类型、基物、伴生树种、日期、采集人 | `points` |
 | IdentifyLog 鉴定结论 | 结论学名、依据、参考图鉴与页码、置信度、是否待复核、复核人 | `identifies` |
+| CurationEvent 整理事件 | 合并/拆分留痕：参与条目、逐项字段采用情况、孢子印与鉴定留痕去向，以及操作前的条目/孢子印/鉴定快照 | `curations` |
 
 - 数据库名 `gbfungiguide`，`meta` 表保存 `schemaVersion`；
 - `version(2)` 升级迁移会为历史条目补齐「菌肉变色反应」默认值（不变色）；
+- `version(3)` 新增记录整理：`curations` 表与条目状态/来源指针索引，并为历史条目补 `status='active'`；
 - 数据仅存于浏览器本地，容器无状态、不挂载命名卷。
+
+### 记录整理规则（合并 / 拆分）
+
+- **合并重复条目**：选择 2 条以上正常条目并指定一条主条目；20 个形态字段逐项选择采用值（冲突行高亮），孢子印与鉴定留痕逐项指定「转到主条目」或「留在原来源」。来源条目转为 `merged` 归档快照，原始形态、未采用观察与其留痕一律不改。
+- **拆分混采编号**：生成至少 2 条独立条目，每条必须有新的采集编号（不得沿用原编号、不得与现有编号重复），逐字段核对并指定孢子印/鉴定留痕转入哪条产物；未转出的随原条目保留，原条目转为 `split` 来源快照。
+- **停止条件（`utils/guards.ts`）**：预演后若出现活跃编号重复、孢子印/鉴定/采集点关联缺失、合并指针自指或成环（含来源互相指向）、整理事件与条目状态不一致，则抛 `CurationGuardError`；全部写入落在单个 Dexie 事务内，整体回滚——原记录、孢子印和鉴定留痕都不改。
+- **展示口径**：图谱默认只显示活跃条目（可勾选查看归档快照），对比与鉴定候选排序仅统计活跃条目；详情页顶部对归档快照给出来源/去向提示，孢子印与鉴定留痕标注「整理转入 / 随快照保留」；整理历史时间线随 IndexedDB 持久化，重开浏览器仍可逐级追溯。
+- 整理链路上的条目（归档快照、合并主条目、拆分产物）禁止直接删除，防止追溯链断裂。
 
 ## 六、主要页面
 
@@ -89,7 +100,8 @@ sologsb-1116/
 | `/atlas/:id` | 条目详情：形态描述分区折叠、孢子印观察登记、采集点编辑（含坐标校验）、鉴定留痕 |
 | `/points` | 采集点管理：经纬度格式校验、条目数与主要基物统计、删除前校验下级条目 |
 | `/identify` | 鉴定工作页：左侧勾选形态特征与印色，右侧实时给出候选名录排序，确认后落鉴定结论 |
-| `/compare` | 条目对比：并排最多 3 条，逐项对照菌盖/菌褶菌管/孢子印差异并高亮 |
+| `/curation` | 记录整理：合并重复条目（逐项选冲突形态值、指定孢子印/鉴定去向）与拆分混采编号（多条新编号独立条目），含整理历史追溯 |
+| `/compare` | 条目对比：并排最多 3 条（仅正常条目），逐项对照菌盖/菌褶菌管/孢子印差异并高亮 |
 
 ## 七、候选排序规则
 

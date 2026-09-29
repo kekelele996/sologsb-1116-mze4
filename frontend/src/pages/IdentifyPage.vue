@@ -29,8 +29,10 @@ const identifyState = useStore(identifyStore)
 const pointState = useStore(pointStore)
 
 const criteria = reactive<MatchCriteria>({ ...EMPTY_CRITERIA })
+/** 候选名录仅包含正常条目；合并 / 拆分后的归档快照不参与候选排序 */
+const activeRecords = computed(() => recordState.records.filter((record) => record.status === 'active'))
 const { candidates, hasCondition } = useCandidateMatch(
-  computed(() => recordState.records),
+  activeRecords,
   computed(() => sporeState.spores),
   computed(() => ({ ...criteria }))
 )
@@ -49,10 +51,13 @@ const logForm = reactive({
 })
 
 watch(
-  () => [recordState.records.length, activeRecordId.value] as const,
+  () => [activeRecords.value.length, activeRecordId.value] as const,
   () => {
-    if (!activeRecordId.value && recordState.records.length > 0) {
-      activeRecordId.value = recordState.records[0].id
+    if (!activeRecordId.value && activeRecords.value.length > 0) {
+      activeRecordId.value = activeRecords.value[0].id
+    }
+    if (activeRecordId.value && !activeRecords.value.some((record) => record.id === activeRecordId.value)) {
+      activeRecordId.value = activeRecords.value[0]?.id ?? ''
     }
   },
   { immediate: true }
