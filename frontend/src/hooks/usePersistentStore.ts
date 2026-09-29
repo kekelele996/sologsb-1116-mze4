@@ -1,7 +1,7 @@
 import { onUnmounted, reactive } from 'vue'
 import type { StoreApi } from 'zustand/vanilla'
 import Dexie, { type Table } from 'dexie'
-import type { CollectPoint, FungusRecord, IdentifyLog, SporePrint } from '@/types'
+import type { CollectPoint, FungusRecord, IdentifyLog, OrganizeLog, SporePrint } from '@/types'
 
 /** IndexedDB 数据结构版本号 */
 export const SCHEMA_VERSION = 2
@@ -11,12 +11,13 @@ export interface MetaRow {
   value: number
 }
 
-/** Dexie 封装：条目 / 孢子印 / 采集点 / 鉴定结论 四张表 + 元数据表 */
+/** Dexie 封装：条目 / 孢子印 / 采集点 / 鉴定结论 / 整理留痕 五张表 + 元数据表 */
 class FungiGuideDb extends Dexie {
   records!: Table<FungusRecord, string>
   spores!: Table<SporePrint, string>
   points!: Table<CollectPoint, string>
   identifies!: Table<IdentifyLog, string>
+  organizations!: Table<OrganizeLog, string>
   meta!: Table<MetaRow, string>
 
   constructor() {
@@ -29,7 +30,7 @@ class FungiGuideDb extends Dexie {
       meta: 'key'
     })
     // v2：新增「菌肉变色反应」字段，迁移时为历史条目补齐默认值（不变色）
-    this.version(SCHEMA_VERSION)
+    this.version(2)
       .stores({
         records: 'id, code, pointId, attachment, capShape',
         spores: 'id, recordId, color, observeDate',
@@ -47,6 +48,15 @@ class FungiGuideDb extends Dexie {
             }
           })
       })
+    // v3：新增「整理留痕」表，记录合并 / 拆分操作以便跨浏览器追溯
+    this.version(3).stores({
+      records: 'id, code, pointId, attachment, capShape, sourceId, mergedInto',
+      spores: 'id, recordId, color, observeDate',
+      points: 'id, name, substrate, vegetation',
+      identifies: 'id, recordId, conclusion, date',
+      organizations: 'id, kind, at, mainId, sourceId, originId',
+      meta: 'key'
+    })
   }
 }
 

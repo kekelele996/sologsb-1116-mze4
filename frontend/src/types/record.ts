@@ -66,4 +66,8 @@ export interface FungusRecord {
   collector: string
   /** 备注（不可作为食用依据） */
   note: string
+  /** 来源记录 id：拆分时指向原记录（新条目由原记录整理而来） */
+  sourceId?: string
+  /** 并入主条目 id：合并时标记来源快照（本快照已并入该主条目） */
+  mergedInto?: string
 }

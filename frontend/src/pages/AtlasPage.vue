@@ -207,6 +207,9 @@ async function removeRecord(record: FungusRecord): Promise<void> {
         <el-button v-if="compareIds.length > 0" type="primary" plain @click="goCompare">
           对比已选 {{ compareIds.length }} 条
         </el-button>
+        <el-button @click="router.push('/organize')">
+          <el-icon><Sort /></el-icon>记录整理
+        </el-button>
         <el-button type="primary" @click="openCreate">
           <el-icon><Plus /></el-icon>新建条目
         </el-button>
@@ -240,6 +243,8 @@ async function removeRecord(record: FungusRecord): Promise<void> {
           <div class="tags">
             <GillAttachmentTag :attachment="item.record.attachment" />
             <SporePrintSwatch :color="item.spore?.color ?? null" :caption="item.spore ? `${item.spore.hours} h` : '未做印'" />
+            <el-tag v-if="item.record.mergedInto" type="info" size="small" effect="plain">来源快照</el-tag>
+            <el-tag v-if="item.record.sourceId" type="info" size="small" effect="plain">拆分来源</el-tag>
           </div>
         </div>
         <div class="cap-line">
@@ -271,6 +276,12 @@ async function removeRecord(record: FungusRecord): Promise<void> {
             @click="toggleCompare(item.record.id)"
           >
             {{ compareIds.includes(item.record.id) ? '已加入对比' : '加入对比' }}
+          </el-button>
+          <el-button
+            size="small"
+            @click="router.push({ path: '/organize', query: { main: item.record.id } })"
+          >
+            合并
           </el-button>
           <el-button size="small" type="danger" plain @click="removeRecord(item.record)">删除</el-button>
         </div>

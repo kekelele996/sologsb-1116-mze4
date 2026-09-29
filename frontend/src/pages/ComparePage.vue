@@ -164,6 +164,8 @@ function diffRowClass(param: { row: DiffRow }): string {
         <div class="col-tags">
           <GillAttachmentTag :attachment="record.attachment" with-hint />
           <SporePrintSwatch :color="sporeOf(record.id)?.color ?? null" size="large" :caption="sporeOf(record.id) ? `获取 ${sporeOf(record.id)?.hours} h` : '未做印'" />
+          <el-tag v-if="record.mergedInto" type="info" size="small" effect="plain">来源快照</el-tag>
+          <el-tag v-if="record.sourceId" type="info" size="small" effect="plain">拆分来源</el-tag>
         </div>
         <TraitsSummary :record="record" :spore="sporeOf(record.id)" :default-open="['cap', 'gill']" compact />
         <p class="col-ident">鉴定结论：{{ conclusionOf(record.id) }}</p>

@@ -13,6 +13,7 @@ import { recordStore } from '@/stores/recordStore'
 import { sporeStore } from '@/stores/sporeStore'
 import { pointStore } from '@/stores/pointStore'
 import { identifyStore } from '@/stores/identifyStore'
+import { organizeStore } from '@/stores/organizeStore'
 import { sporeColorHex } from '@/utils/spore'
 import { uid } from '@/utils/id'
 
@@ -22,6 +23,7 @@ const recordState = useStore(recordStore)
 const sporeState = useStore(sporeStore)
 const pointState = useStore(pointStore)
 const identifyState = useStore(identifyStore)
+const organizeState = useStore(organizeStore)
 
 const record = computed(() => recordState.records.find((item) => item.id === route.params.id) ?? null)
 const spore = computed(() => sporeState.spores.find((item) => item.recordId === record.value?.id) ?? null)
@@ -31,6 +33,26 @@ const recordPointName = computed(() => {
   const current = record.value
   if (!current) return '未关联'
   return pointState.points.find((item) => item.id === current.pointId)?.name ?? '未关联'
+})
+
+/** 整理追溯：合并主条目 / 拆分来源原记录 */
+const mergedIntoRecord = computed(() =>
+  record.value?.mergedInto ? recordState.records.find((item) => item.id === record.value?.mergedInto) ?? null : null
+)
+const sourceRecord = computed(() =>
+  record.value?.sourceId ? recordState.records.find((item) => item.id === record.value?.sourceId) ?? null : null
+)
+/** 与本条相关的整理留痕 */
+const relatedLogs = computed(() => {
+  const id = record.value?.id
+  if (!id) return []
+  return organizeState.logs.filter(
+    (log) =>
+      log.mainId === id ||
+      log.sourceId === id ||
+      log.originId === id ||
+      (log.newIds ?? []).includes(id)
+  )
 })
 
 const sporeForm = reactive({
@@ -124,11 +146,45 @@ async function removeSpore(): Promise<void> {
       </div>
       <div class="head-actions">
         <el-button @click="router.push('/atlas')">返回图谱</el-button>
+        <el-button v-if="record" @click="router.push({ path: '/organize', query: { split: record.id } })">拆分本条</el-button>
         <el-button v-if="record" @click="router.push('/identify')">去鉴定</el-button>
       </div>
     </div>
 
     <template v-if="record">
+      <el-card v-if="record.mergedInto || record.sourceId || relatedLogs.length" shadow="never" class="block trace-card">
+        <template #header>整理追溯</template>
+        <div class="trace-body">
+          <el-tag v-if="record.mergedInto" type="info" effect="dark">来源快照</el-tag>
+          <el-tag v-if="record.sourceId" type="info" effect="dark">拆分来源</el-tag>
+          <span v-if="mergedIntoRecord" class="trace-line">
+            本条目为来源快照，已并入主条目
+            <el-button link type="primary" @click="router.push(`/atlas/${mergedIntoRecord.id}`)">
+              {{ mergedIntoRecord.code }} · {{ mergedIntoRecord.tempName || '未命名' }}
+            </el-button>
+            ；未采用的形态值与观察留痕仍随本快照保留。
+          </span>
+          <span v-if="sourceRecord" class="trace-line">
+            本条目由原记录
+            <el-button link type="primary" @click="router.push(`/atlas/${sourceRecord.id}`)">
+              {{ sourceRecord.code }} · {{ sourceRecord.tempName || '未命名' }}
+            </el-button>
+            拆分而来，原编号与字段保留为来源。
+          </span>
+          <span v-for="log in relatedLogs" :key="log.id" class="trace-line">
+            <template v-if="log.kind === 'merge'">
+              {{ log.at.slice(0, 10) }} 合并：主条目 {{ log.mainCode }} ← 来源快照 {{ log.sourceCode }}
+              （冲突 {{ Object.keys(log.chosen ?? {}).length }} 项，转孢子印 {{ log.transferredSporeIds?.length ?? 0 }} 条、
+              鉴定 {{ log.transferredIdentifyIds?.length ?? 0 }} 条）
+            </template>
+            <template v-else>
+              {{ log.at.slice(0, 10) }} 拆分：原记录 {{ log.originCode }} →
+              <span v-for="(code, idx) in log.newCodes" :key="code">{{ code }}<span v-if="idx < (log.newCodes?.length ?? 0) - 1">、</span></span>
+            </template>
+          </span>
+        </div>
+      </el-card>
+
       <el-card shadow="never" class="block">
         <template #header>
           <div class="block-head">
@@ -224,6 +280,19 @@ async function removeSpore(): Promise<void> {
 .block {
   border-radius: 12px;
   margin-bottom: 16px;
+}
+.trace-card {
+  border-left: 3px solid #8e6bbf;
+}
+.trace-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.trace-line {
+  font-size: 13px;
+  color: #4b5b50;
+  line-height: 1.6;
 }
 .block-head {
   display: flex;
